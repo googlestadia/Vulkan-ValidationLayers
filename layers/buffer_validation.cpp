@@ -1456,7 +1456,7 @@ void CoreChecks::PostCallRecordCreateImage(VkDevice device, const VkImageCreateI
 
 bool CoreChecks::PreCallValidateDestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks *pAllocator) {
     IMAGE_STATE *image_state = GetImageState(image);
-    const VK_OBJECT obj_struct(image);
+    const VulkanTypedHandle obj_struct(image);
     bool skip = false;
     if (image_state) {
         skip |= ValidateObjectNotInUse(image_state, obj_struct, "vkDestroyImage", "VUID-vkDestroyImage-image-01000");
@@ -1467,7 +1467,7 @@ bool CoreChecks::PreCallValidateDestroyImage(VkDevice device, VkImage image, con
 void CoreChecks::PreCallRecordDestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks *pAllocator) {
     if (!image) return;
     IMAGE_STATE *image_state = GetImageState(image);
-    VK_OBJECT obj_struct(image);
+    VulkanTypedHandle obj_struct(image);
     InvalidateCommandBuffers(image_state->cb_bindings, obj_struct);
     // Clean up memory mapping, bindings and range references for image
     for (auto mem_binding : image_state->GetBoundMemory()) {
@@ -4368,7 +4368,7 @@ bool CoreChecks::ValidateIdleBuffer(VkBuffer buffer) {
 
 bool CoreChecks::PreCallValidateDestroyImageView(VkDevice device, VkImageView imageView, const VkAllocationCallbacks *pAllocator) {
     IMAGE_VIEW_STATE *image_view_state = GetImageViewState(imageView);
-    VK_OBJECT obj_struct(imageView);
+    VulkanTypedHandle obj_struct(imageView);
 
     bool skip = false;
     if (image_view_state) {
@@ -4381,7 +4381,7 @@ bool CoreChecks::PreCallValidateDestroyImageView(VkDevice device, VkImageView im
 void CoreChecks::PreCallRecordDestroyImageView(VkDevice device, VkImageView imageView, const VkAllocationCallbacks *pAllocator) {
     IMAGE_VIEW_STATE *image_view_state = GetImageViewState(imageView);
     if (!image_view_state) return;
-    VK_OBJECT obj_struct(imageView);
+    VulkanTypedHandle obj_struct(imageView);
 
     // Any bound cmd buffers are now invalid
     InvalidateCommandBuffers(image_view_state->cb_bindings, obj_struct);
@@ -4401,7 +4401,7 @@ bool CoreChecks::PreCallValidateDestroyBuffer(VkDevice device, VkBuffer buffer, 
 void CoreChecks::PreCallRecordDestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks *pAllocator) {
     if (!buffer) return;
     auto buffer_state = GetBufferState(buffer);
-    VK_OBJECT obj_struct(buffer);
+    VulkanTypedHandle obj_struct(buffer);
 
     InvalidateCommandBuffers(buffer_state->cb_bindings, obj_struct);
     for (auto mem_binding : buffer_state->GetBoundMemory()) {
@@ -4418,7 +4418,7 @@ void CoreChecks::PreCallRecordDestroyBuffer(VkDevice device, VkBuffer buffer, co
 bool CoreChecks::PreCallValidateDestroyBufferView(VkDevice device, VkBufferView bufferView,
                                                   const VkAllocationCallbacks *pAllocator) {
     auto buffer_view_state = GetBufferViewState(bufferView);
-    VK_OBJECT obj_struct(bufferView);
+    VulkanTypedHandle obj_struct(bufferView);
     bool skip = false;
     if (buffer_view_state) {
         skip |= ValidateObjectNotInUse(buffer_view_state, obj_struct, "vkDestroyBufferView",
@@ -4430,7 +4430,7 @@ bool CoreChecks::PreCallValidateDestroyBufferView(VkDevice device, VkBufferView 
 void CoreChecks::PreCallRecordDestroyBufferView(VkDevice device, VkBufferView bufferView, const VkAllocationCallbacks *pAllocator) {
     if (!bufferView) return;
     auto buffer_view_state = GetBufferViewState(bufferView);
-    VK_OBJECT obj_struct(bufferView);
+    VulkanTypedHandle obj_struct(bufferView);
 
     // Any bound cmd buffers are now invalid
     InvalidateCommandBuffers(buffer_view_state->cb_bindings, obj_struct);

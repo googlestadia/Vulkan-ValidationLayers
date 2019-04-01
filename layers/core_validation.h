@@ -269,8 +269,8 @@ class CoreChecks : public ValidationObject {
     bool SetSparseMemBinding(MEM_BINDING binding, const VulkanTypedHandle& typed_handle);
     bool ValidateDeviceQueueFamily(uint32_t queue_family, const char* cmd_name, const char* parameter_name, const char* error_code,
                                    bool optional);
-    BASE_NODE* GetStateStructPtrFromObject(VK_OBJECT object_struct);
-    void RemoveCommandBufferBinding(VK_OBJECT const* object, GLOBAL_CB_NODE* cb_node);
+    BASE_NODE* GetStateStructPtrFromObject(VulkanTypedHandle object_struct);
+    void RemoveCommandBufferBinding(VulkanTypedHandle const* object, GLOBAL_CB_NODE* cb_node);
     bool ValidateBindBufferMemory(VkBuffer buffer, VkDeviceMemory mem, VkDeviceSize memoryOffset, const char* api_name);
     void RecordGetBufferMemoryRequirementsState(VkBuffer buffer, VkMemoryRequirements* pMemoryRequirements);
     void UpdateBindBufferMemoryState(VkBuffer buffer, VkDeviceMemory mem, VkDeviceSize memoryOffset);
@@ -293,7 +293,7 @@ class CoreChecks : public ValidationObject {
     bool ValidatePipelineUnlocked(std::vector<std::unique_ptr<PIPELINE_STATE>> const& pPipelines, int pipelineIndex);
     void FreeDescriptorSet(cvdescriptorset::DescriptorSet* descriptor_set);
     void DeletePools();
-    bool ValidImageBufferQueue(GLOBAL_CB_NODE* cb_node, const VK_OBJECT& object, VkQueue queue, uint32_t count,
+    bool ValidImageBufferQueue(GLOBAL_CB_NODE* cb_node, const VulkanTypedHandle& object, VkQueue queue, uint32_t count,
                                const uint32_t* indices);
     bool ValidateFenceForSubmit(FENCE_NODE* pFence);
     void AddMemObjInfo(void* object, const VkDeviceMemory mem, const VkMemoryAllocateInfo* pAllocateInfo);
@@ -471,8 +471,9 @@ class CoreChecks : public ValidationObject {
     void AddCommandBufferBindingImageView(GLOBAL_CB_NODE*, IMAGE_VIEW_STATE*);
     void AddCommandBufferBindingBuffer(GLOBAL_CB_NODE*, BUFFER_STATE*);
     void AddCommandBufferBindingBufferView(GLOBAL_CB_NODE*, BUFFER_VIEW_STATE*);
-    bool ValidateObjectNotInUse(BASE_NODE* obj_node, const VK_OBJECT& obj_struct, const char* caller_name, const char* error_code);
-    void InvalidateCommandBuffers(std::unordered_set<GLOBAL_CB_NODE*> const& cb_nodes, VK_OBJECT obj);
+    bool ValidateObjectNotInUse(BASE_NODE* obj_node, const VulkanTypedHandle& obj_struct, const char* caller_name,
+                                const char* error_code);
+    void InvalidateCommandBuffers(std::unordered_set<GLOBAL_CB_NODE*> const& cb_nodes, VulkanTypedHandle obj);
     void RemoveImageMemoryRange(uint64_t handle, DEVICE_MEM_INFO* mem_info);
     void RemoveBufferMemoryRange(uint64_t handle, DEVICE_MEM_INFO* mem_info);
     void ClearMemoryObjectBindings(const VulkanTypedHandle& typed_handle);
