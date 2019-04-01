@@ -111,13 +111,10 @@ inline bool IsSpecial(const uint32_t queue_family_index) {
     return (queue_family_index == VK_QUEUE_FAMILY_EXTERNAL_KHR) || (queue_family_index == VK_QUEUE_FAMILY_FOREIGN_EXT);
 }
 
-// Generic wrapper for vulkan objects
-struct VK_OBJECT {
-    uint64_t handle;
-    VulkanObjectType type;
-};
+// Generic wrapper for vulkan objects -- using the one from vk_object_types.h now.
+typedef VulkanTypedHandle VK_OBJECT;
 
-inline bool operator==(VK_OBJECT a, VK_OBJECT b) NOEXCEPT { return a.handle == b.handle && a.type == b.type; }
+inline bool operator==(const VK_OBJECT &a, const VK_OBJECT &b) NOEXCEPT { return a.handle == b.handle && a.type == b.type; }
 
 namespace std {
 template <>

@@ -203,10 +203,22 @@ typedef struct _debug_report_data {
     // Backwards compatible path for entry points that pass uint64_t's
     std::string FormatHandle(uint64_t h) const { return FormatHandle("", h); }
 
+#ifdef TYPESAFE_NON_DISPATCHABLE_HANDLES
     template <typename HANDLE_T>
     std::string FormatHandle(HANDLE_T h) const {
         return FormatHandle(VkHandleInfo<HANDLE_T>::Typename(), HandleToUint64(h));
     }
+
+    template <>
+    std::string FormatHandle<const VulkanTypedHandle &>(const VulkanTypedHandle &handle) const {
+        return FormatHandle(object_string[handle.type], handle.handle);
+    }
+#else
+    template <typename HANDLE_T>
+    std::string FormatHandle(HANDLE_T *h) const {
+        return FormatHandle("", HandleToUint64(h));
+    }
+#endif
 
 } debug_report_data;
 

@@ -1240,9 +1240,9 @@ void cvdescriptorset::DescriptorSet::UpdateDrawState(CoreChecks *device_data, GL
     // bind cb to this descriptor set
     cb_bindings.insert(cb_node);
     // Add bindings for descriptor set, the set's pool, and individual objects in the set
-    cb_node->object_bindings.insert({HandleToUint64(set_), kVulkanObjectTypeDescriptorSet});
+    cb_node->object_bindings.insert(set_);
     pool_state_->cb_bindings.insert(cb_node);
-    cb_node->object_bindings.insert({HandleToUint64(pool_state_->pool), kVulkanObjectTypeDescriptorPool});
+    cb_node->object_bindings.insert(pool_state_->pool);
     // For the active slots, use set# to look up descriptorSet from boundDescriptorSets, and bind all of that descriptor set's
     // resources
     for (auto binding_req_pair : binding_req_map) {
