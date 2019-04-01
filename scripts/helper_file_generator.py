@@ -804,6 +804,7 @@ class HelperFileOutputGenerator(OutputGenerator):
                 VulkanObjectType type;
                 template <typename Handle>
                 Handle Cast() const {
+                    if (type != VkHandleInfo<Handle>::kVulkanObjectType)
                     assert(type == VkHandleInfo<Handle>::kVulkanObjectType);
                     return CastFromUint64<Handle>(handle);
                 }
