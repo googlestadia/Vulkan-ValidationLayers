@@ -340,6 +340,14 @@ struct MEMORY_RANGE {
     std::unordered_set<MEMORY_RANGE *> aliases;
 };
 
+static inline VulkanTypedHandle MemoryRangeTypedHandle(const MEMORY_RANGE &range) {
+    // TODO: Convert MEMORY_RANGE to use VulkanTypedHandle internally
+    if (range.image) {
+        return VulkanTypedHandle(CastFromUint64<VkImage>(range.handle));
+    }
+    return VulkanTypedHandle(CastFromUint64<VkBuffer>(range.handle));
+}
+
 // Data struct for tracking memory object
 struct DEVICE_MEM_INFO : public BASE_NODE {
     void *object;  // Dispatchable object used to create this memory (device of swapchain)

@@ -258,16 +258,15 @@ class CoreChecks : public ValidationObject {
     PHYSICAL_DEVICE_STATE* GetPhysicalDeviceState(VkPhysicalDevice phys);
     PHYSICAL_DEVICE_STATE* GetPhysicalDeviceState();
     SURFACE_STATE* GetSurfaceState(VkSurfaceKHR surface);
-    BINDABLE* GetObjectMemBinding(uint64_t handle, VulkanObjectType type);
+    BINDABLE* GetObjectMemBinding(const VulkanTypedHandle& typed_handle);
 
     bool VerifyQueueStateToSeq(QUEUE_STATE* initial_queue, uint64_t initial_seq);
     void ClearCmdBufAndMemReferences(GLOBAL_CB_NODE* cb_node);
-    void ClearMemoryObjectBinding(uint64_t handle, VulkanObjectType type, VkDeviceMemory mem);
+    void ClearMemoryObjectBinding(const VulkanTypedHandle& typed_handle, VkDeviceMemory mem);
     void ResetCommandBufferState(const VkCommandBuffer cb);
-    void SetMemBinding(VkDeviceMemory mem, BINDABLE* mem_binding, VkDeviceSize memory_offset, uint64_t handle,
-                       VulkanObjectType type);
-    bool ValidateSetMemBinding(VkDeviceMemory mem, uint64_t handle, VulkanObjectType type, const char* apiName);
-    bool SetSparseMemBinding(MEM_BINDING binding, uint64_t handle, VulkanObjectType type);
+    void SetMemBinding(VkDeviceMemory mem, BINDABLE* mem_binding, VkDeviceSize memory_offset, const VulkanTypedHandle& handle);
+    bool ValidateSetMemBinding(VkDeviceMemory mem, const VulkanTypedHandle& typed_handle, const char* apiName);
+    bool SetSparseMemBinding(MEM_BINDING binding, const VulkanTypedHandle& typed_handle);
     bool ValidateDeviceQueueFamily(uint32_t queue_family, const char* cmd_name, const char* parameter_name, const char* error_code,
                                    bool optional);
     BASE_NODE* GetStateStructPtrFromObject(VK_OBJECT object_struct);
@@ -294,7 +293,7 @@ class CoreChecks : public ValidationObject {
     bool ValidatePipelineUnlocked(std::vector<std::unique_ptr<PIPELINE_STATE>> const& pPipelines, int pipelineIndex);
     void FreeDescriptorSet(cvdescriptorset::DescriptorSet* descriptor_set);
     void DeletePools();
-    bool ValidImageBufferQueue(GLOBAL_CB_NODE* cb_node, const VK_OBJECT* object, VkQueue queue, uint32_t count,
+    bool ValidImageBufferQueue(GLOBAL_CB_NODE* cb_node, const VK_OBJECT& object, VkQueue queue, uint32_t count,
                                const uint32_t* indices);
     bool ValidateFenceForSubmit(FENCE_NODE* pFence);
     void AddMemObjInfo(void* object, const VkDeviceMemory mem, const VkMemoryAllocateInfo* pAllocateInfo);
@@ -330,8 +329,8 @@ class CoreChecks : public ValidationObject {
                                         const VkGraphicsPipelineCreateInfo* pipe_cis);
     void AddFramebufferBinding(GLOBAL_CB_NODE* cb_state, FRAMEBUFFER_STATE* fb_state);
     bool ValidateImageBarrierImage(const char* funcName, GLOBAL_CB_NODE const* cb_state, VkFramebuffer framebuffer,
-                                   uint32_t active_subpass, const safe_VkSubpassDescription2KHR& sub_desc, uint64_t rp_handle,
-                                   uint32_t img_index, const VkImageMemoryBarrier& img_barrier);
+                                   uint32_t active_subpass, const safe_VkSubpassDescription2KHR& sub_desc,
+                                   const VulkanTypedHandle& rp_handle, uint32_t img_index, const VkImageMemoryBarrier& img_barrier);
     void RecordCmdBeginRenderPassState(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
                                        const VkSubpassContents contents);
     bool ValidateCmdBeginRenderPass(VkCommandBuffer commandBuffer, RenderPassCreateVersion rp_version,
@@ -369,7 +368,7 @@ class CoreChecks : public ValidationObject {
                                                     const char* function, const char* error_code);
     bool SetEventStageMask(VkQueue queue, VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags stageMask);
     bool ValidateRenderPassImageBarriers(const char* funcName, GLOBAL_CB_NODE* cb_state, uint32_t active_subpass,
-                                         const safe_VkSubpassDescription2KHR& sub_desc, uint64_t rp_handle,
+                                         const safe_VkSubpassDescription2KHR& sub_desc, const VulkanTypedHandle& rp_handle,
                                          const safe_VkSubpassDependency2KHR* dependencies,
                                          const std::vector<uint32_t>& self_dependencies, uint32_t image_mem_barrier_count,
                                          const VkImageMemoryBarrier* image_barriers);
@@ -472,11 +471,11 @@ class CoreChecks : public ValidationObject {
     void AddCommandBufferBindingImageView(GLOBAL_CB_NODE*, IMAGE_VIEW_STATE*);
     void AddCommandBufferBindingBuffer(GLOBAL_CB_NODE*, BUFFER_STATE*);
     void AddCommandBufferBindingBufferView(GLOBAL_CB_NODE*, BUFFER_VIEW_STATE*);
-    bool ValidateObjectNotInUse(BASE_NODE* obj_node, VK_OBJECT obj_struct, const char* caller_name, const char* error_code);
+    bool ValidateObjectNotInUse(BASE_NODE* obj_node, const VK_OBJECT& obj_struct, const char* caller_name, const char* error_code);
     void InvalidateCommandBuffers(std::unordered_set<GLOBAL_CB_NODE*> const& cb_nodes, VK_OBJECT obj);
     void RemoveImageMemoryRange(uint64_t handle, DEVICE_MEM_INFO* mem_info);
     void RemoveBufferMemoryRange(uint64_t handle, DEVICE_MEM_INFO* mem_info);
-    void ClearMemoryObjectBindings(uint64_t handle, VulkanObjectType type);
+    void ClearMemoryObjectBindings(const VulkanTypedHandle& typed_handle);
     bool ValidateCmdQueueFlags(const GLOBAL_CB_NODE* cb_node, const char* caller_name, VkQueueFlags flags, const char* error_code);
     bool InsideRenderPass(const GLOBAL_CB_NODE* pCB, const char* apiName, const char* msgCode);
     bool OutsideRenderPass(GLOBAL_CB_NODE* pCB, const char* apiName, const char* msgCode);
@@ -640,7 +639,7 @@ class CoreChecks : public ValidationObject {
                                                           const IMAGE_STATE* dst_img, const VkImageCopy* region, const uint32_t i,
                                                           const char* function);
     bool ValidateIdleBuffer(VkBuffer buffer);
-    bool ValidateUsageFlags(VkFlags actual, VkFlags desired, VkBool32 strict, uint64_t obj_handle, VulkanObjectType obj_type,
+    bool ValidateUsageFlags(VkFlags actual, VkFlags desired, VkBool32 strict, const VulkanTypedHandle& typed_handle,
                             const char* msgCode, char const* func_name, char const* usage_str);
     bool ValidateImageSubresourceRange(const uint32_t image_mip_count, const uint32_t image_layer_count,
                                        const VkImageSubresourceRange& subresourceRange, const char* cmd_name,
@@ -816,7 +815,7 @@ class CoreChecks : public ValidationObject {
 
     void UpdateCmdBufImageLayouts(GLOBAL_CB_NODE* pCB);
 
-    bool VerifyBoundMemoryIsValid(VkDeviceMemory mem, uint64_t handle, const char* api_name, const char* type_name,
+    bool VerifyBoundMemoryIsValid(VkDeviceMemory mem, const VulkanTypedHandle& typed_handle, const char* api_name,
                                   const char* error_code);
 
     bool ValidateLayoutVsAttachmentDescription(const debug_report_data* report_data, RenderPassCreateVersion rp_version,

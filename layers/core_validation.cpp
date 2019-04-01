@@ -255,12 +255,12 @@ SURFACE_STATE *CoreChecks::GetSurfaceState(VkSurfaceKHR surface) {
 }
 
 // Return ptr to memory binding for given handle of specified type
-BINDABLE *CoreChecks::GetObjectMemBinding(uint64_t handle, VulkanObjectType type) {
-    switch (type) {
+BINDABLE *CoreChecks::GetObjectMemBinding(const VulkanTypedHandle &typed_handle) {
+    switch (typed_handle.type) {
         case kVulkanObjectTypeImage:
-            return GetImageState(VkImage(handle));
+            return GetImageState(VkImage(typed_handle.handle));
         case kVulkanObjectTypeBuffer:
-            return GetBufferState(VkBuffer(handle));
+            return GetBufferState(VkBuffer(typed_handle.handle));
         default:
             break;
     }
@@ -481,44 +481,46 @@ void CoreChecks::ClearCmdBufAndMemReferences(GLOBAL_CB_NODE *cb_node) {
 }
 
 // Clear a single object binding from given memory object
-void CoreChecks::ClearMemoryObjectBinding(uint64_t handle, VulkanObjectType type, VkDeviceMemory mem) {
+void CoreChecks::ClearMemoryObjectBinding(const VulkanTypedHandle &typed_handle, VkDeviceMemory mem) {
     DEVICE_MEM_INFO *mem_info = GetMemObjInfo(mem);
     // This obj is bound to a memory object. Remove the reference to this object in that memory object's list
     if (mem_info) {
-        mem_info->obj_bindings.erase({handle, type});
+        mem_info->obj_bindings.erase(typed_handle);
     }
 }
 
 // ClearMemoryObjectBindings clears the binding of objects to memory
 //  For the given object it pulls the memory bindings and makes sure that the bindings
 //  no longer refer to the object being cleared. This occurs when objects are destroyed.
-void CoreChecks::ClearMemoryObjectBindings(uint64_t handle, VulkanObjectType type) {
-    BINDABLE *mem_binding = GetObjectMemBinding(handle, type);
+void CoreChecks::ClearMemoryObjectBindings(const VulkanTypedHandle &typed_handle) {
+    BINDABLE *mem_binding = GetObjectMemBinding(typed_handle);
     if (mem_binding) {
         if (!mem_binding->sparse) {
-            ClearMemoryObjectBinding(handle, type, mem_binding->binding.mem);
+            ClearMemoryObjectBinding(typed_handle, mem_binding->binding.mem);
         } else {  // Sparse, clear all bindings
             for (auto &sparse_mem_binding : mem_binding->sparse_bindings) {
-                ClearMemoryObjectBinding(handle, type, sparse_mem_binding.mem);
+                ClearMemoryObjectBinding(typed_handle, sparse_mem_binding.mem);
             }
         }
     }
 }
 
 // For given mem object, verify that it is not null or UNBOUND, if it is, report error. Return skip value.
-bool CoreChecks::VerifyBoundMemoryIsValid(VkDeviceMemory mem, uint64_t handle, const char *api_name, const char *type_name,
+bool CoreChecks::VerifyBoundMemoryIsValid(VkDeviceMemory mem, const VulkanTypedHandle &typed_handle, const char *api_name,
                                           const char *error_code) {
     bool result = false;
+    auto type_name = object_string[typed_handle.type];
     if (VK_NULL_HANDLE == mem) {
-        result = log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, handle, error_code,
-                         "%s: Vk%s object %s used with no memory bound. Memory should be bound by calling vkBind%sMemory().",
-                         api_name, type_name, report_data->FormatHandle(handle).c_str(), type_name);
-    } else if (MEMORY_UNBOUND == mem) {
         result =
-            log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, handle, error_code,
-                    "%s: Vk%s object %s used with no memory bound and previously bound memory was freed. Memory must not be freed "
-                    "prior to this operation.",
-                    api_name, type_name, report_data->FormatHandle(handle).c_str());
+            log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, typed_handle.handle,
+                    error_code, "%s: Vk%s object %s used with no memory bound. Memory should be bound by calling vkBind%sMemory().",
+                    api_name, type_name, report_data->FormatHandle(typed_handle).c_str(), type_name);
+    } else if (MEMORY_UNBOUND == mem) {
+        result = log_msg(
+            report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT, typed_handle.handle, error_code,
+            "%s: Vk%s object %s used with no memory bound and previously bound memory was freed. Memory must not be freed "
+            "prior to this operation.",
+            api_name, type_name, report_data->FormatHandle(typed_handle).c_str());
     }
     return result;
 }
@@ -527,8 +529,7 @@ bool CoreChecks::VerifyBoundMemoryIsValid(VkDeviceMemory mem, uint64_t handle, c
 bool CoreChecks::ValidateMemoryIsBoundToImage(const IMAGE_STATE *image_state, const char *api_name, const char *error_code) {
     bool result = false;
     if (0 == (static_cast<uint32_t>(image_state->createInfo.flags) & VK_IMAGE_CREATE_SPARSE_BINDING_BIT)) {
-        result =
-            VerifyBoundMemoryIsValid(image_state->binding.mem, HandleToUint64(image_state->image), api_name, "Image", error_code);
+        result = VerifyBoundMemoryIsValid(image_state->binding.mem, VulkanTypedHandle(image_state->image), api_name, error_code);
     }
     return result;
 }
@@ -537,16 +538,15 @@ bool CoreChecks::ValidateMemoryIsBoundToImage(const IMAGE_STATE *image_state, co
 bool CoreChecks::ValidateMemoryIsBoundToBuffer(const BUFFER_STATE *buffer_state, const char *api_name, const char *error_code) {
     bool result = false;
     if (0 == (static_cast<uint32_t>(buffer_state->createInfo.flags) & VK_BUFFER_CREATE_SPARSE_BINDING_BIT)) {
-        result = VerifyBoundMemoryIsValid(buffer_state->binding.mem, HandleToUint64(buffer_state->buffer), api_name, "Buffer",
-                                          error_code);
+        result = VerifyBoundMemoryIsValid(buffer_state->binding.mem, VulkanTypedHandle(buffer_state->buffer), api_name, error_code);
     }
     return result;
 }
 
 // SetMemBinding is used to establish immutable, non-sparse binding between a single image/buffer object and memory object.
 // Corresponding valid usage checks are in ValidateSetMemBinding().
-void CoreChecks::SetMemBinding(VkDeviceMemory mem, BINDABLE *mem_binding, VkDeviceSize memory_offset, uint64_t handle,
-                               VulkanObjectType type) {
+void CoreChecks::SetMemBinding(VkDeviceMemory mem, BINDABLE *mem_binding, VkDeviceSize memory_offset,
+                               const VulkanTypedHandle &typed_handle) {
     assert(mem_binding);
     mem_binding->binding.mem = mem;
     mem_binding->UpdateBoundMemorySet();  // force recreation of cached set
@@ -556,10 +556,10 @@ void CoreChecks::SetMemBinding(VkDeviceMemory mem, BINDABLE *mem_binding, VkDevi
     if (mem != VK_NULL_HANDLE) {
         DEVICE_MEM_INFO *mem_info = GetMemObjInfo(mem);
         if (mem_info) {
-            mem_info->obj_bindings.insert(VulkanTypedHandle{handle, type});
+            mem_info->obj_bindings.insert(typed_handle);
             // For image objects, make sure default memory state is correctly set
             // TODO : What's the best/correct way to handle this?
-            if (kVulkanObjectTypeImage == type) {
+            if (kVulkanObjectTypeImage == typed_handle.type) {
                 auto const image_state = reinterpret_cast<const IMAGE_STATE *>(mem_binding);
                 if (image_state) {
                     VkImageCreateInfo ici = image_state->createInfo;
@@ -579,43 +579,43 @@ void CoreChecks::SetMemBinding(VkDeviceMemory mem, BINDABLE *mem_binding, VkDevi
 //  Otherwise, add reference from objectInfo to memoryInfo
 //  Add reference off of objInfo
 // TODO: We may need to refactor or pass in multiple valid usage statements to handle multiple valid usage conditions.
-bool CoreChecks::ValidateSetMemBinding(VkDeviceMemory mem, uint64_t handle, VulkanObjectType type, const char *apiName) {
+bool CoreChecks::ValidateSetMemBinding(VkDeviceMemory mem, const VulkanTypedHandle &typed_handle, const char *apiName) {
     bool skip = false;
     // It's an error to bind an object to NULL memory
     if (mem != VK_NULL_HANDLE) {
-        BINDABLE *mem_binding = GetObjectMemBinding(handle, type);
+        BINDABLE *mem_binding = GetObjectMemBinding(typed_handle);
         assert(mem_binding);
         if (mem_binding->sparse) {
             const char *error_code = "VUID-vkBindImageMemory-image-01045";
             const char *handle_type = "IMAGE";
-            if (type == kVulkanObjectTypeBuffer) {
+            if (typed_handle.type == kVulkanObjectTypeBuffer) {
                 error_code = "VUID-vkBindBufferMemory-buffer-01030";
                 handle_type = "BUFFER";
             } else {
-                assert(type == kVulkanObjectTypeImage);
+                assert(typed_handle.type == kVulkanObjectTypeImage);
             }
-            skip |=
-                log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT,
-                        HandleToUint64(mem), error_code,
-                        "In %s, attempting to bind memory (%s) to object (%s) which was created with sparse memory flags "
-                        "(VK_%s_CREATE_SPARSE_*_BIT).",
-                        apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(handle).c_str(), handle_type);
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT,
+                            HandleToUint64(mem), error_code,
+                            "In %s, attempting to bind memory (%s) to object (%s) which was created with sparse memory flags "
+                            "(VK_%s_CREATE_SPARSE_*_BIT).",
+                            apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(typed_handle).c_str(),
+                            handle_type);
         }
         DEVICE_MEM_INFO *mem_info = GetMemObjInfo(mem);
         if (mem_info) {
             DEVICE_MEM_INFO *prev_binding = GetMemObjInfo(mem_binding->binding.mem);
             if (prev_binding) {
                 const char *error_code = "VUID-vkBindImageMemory-image-01044";
-                if (type == kVulkanObjectTypeBuffer) {
+                if (typed_handle.type == kVulkanObjectTypeBuffer) {
                     error_code = "VUID-vkBindBufferMemory-buffer-01029";
                 } else {
-                    assert(type == kVulkanObjectTypeImage);
+                    assert(typed_handle.type == kVulkanObjectTypeImage);
                 }
                 skip |=
                     log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT,
                             HandleToUint64(mem), error_code,
                             "In %s, attempting to bind memory (%s) to object (%s) which has already been bound to mem object %s.",
-                            apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(handle).c_str(),
+                            apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(typed_handle).c_str(),
                             report_data->FormatHandle(prev_binding->mem).c_str());
             } else if (mem_binding->binding.mem == MEMORY_UNBOUND) {
                 skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT,
@@ -623,7 +623,7 @@ bool CoreChecks::ValidateSetMemBinding(VkDeviceMemory mem, uint64_t handle, Vulk
                                 "In %s, attempting to bind memory (%s) to object (%s) which was previous bound to memory that has "
                                 "since been freed. Memory bindings are immutable in "
                                 "Vulkan so this attempt to bind to new memory is not allowed.",
-                                apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(handle).c_str());
+                                apiName, report_data->FormatHandle(mem).c_str(), report_data->FormatHandle(typed_handle).c_str());
             }
         }
     }
@@ -636,19 +636,19 @@ bool CoreChecks::ValidateSetMemBinding(VkDeviceMemory mem, uint64_t handle, Vulk
 //  Add reference from objectInfo to memoryInfo
 //  Add reference off of object's binding info
 // Return VK_TRUE if addition is successful, VK_FALSE otherwise
-bool CoreChecks::SetSparseMemBinding(MEM_BINDING binding, uint64_t handle, VulkanObjectType type) {
+bool CoreChecks::SetSparseMemBinding(MEM_BINDING binding, const VulkanTypedHandle &typed_handle) {
     bool skip = VK_FALSE;
     // Handle NULL case separately, just clear previous binding & decrement reference
     if (binding.mem == VK_NULL_HANDLE) {
         // TODO : This should cause the range of the resource to be unbound according to spec
     } else {
-        BINDABLE *mem_binding = GetObjectMemBinding(handle, type);
+        BINDABLE *mem_binding = GetObjectMemBinding(typed_handle);
         assert(mem_binding);
         if (mem_binding) {  // Invalid handles are reported by object tracker, but Get returns NULL for them, so avoid SEGV here
             assert(mem_binding->sparse);
             DEVICE_MEM_INFO *mem_info = GetMemObjInfo(binding.mem);
             if (mem_info) {
-                mem_info->obj_bindings.insert(VulkanTypedHandle{handle, type});
+                mem_info->obj_bindings.insert(typed_handle);
                 // Need to set mem binding for this object
                 mem_binding->sparse_bindings.insert(binding);
                 mem_binding->UpdateBoundMemorySet();
@@ -1983,7 +1983,7 @@ bool CoreChecks::ReportInvalidCommandBuffer(const GLOBAL_CB_NODE *cb_state, cons
                         HandleToUint64(cb_state->commandBuffer), kVUID_Core_DrawState_InvalidCommandBuffer,
                         "You are adding %s to command buffer %s that is invalid because bound %s %s was %s.", call_source,
                         report_data->FormatHandle(cb_state->commandBuffer).c_str(), type_str,
-                        report_data->FormatHandle(obj.handle).c_str(), cause_str);
+                        report_data->FormatHandle(obj).c_str(), cause_str);
     }
     return skip;
 }
@@ -3015,7 +3015,7 @@ bool CoreChecks::ValidateResources(GLOBAL_CB_NODE *cb_node) {
 }
 
 // Check that the queue family index of 'queue' matches one of the entries in pQueueFamilyIndices
-bool CoreChecks::ValidImageBufferQueue(GLOBAL_CB_NODE *cb_node, const VK_OBJECT *object, VkQueue queue, uint32_t count,
+bool CoreChecks::ValidImageBufferQueue(GLOBAL_CB_NODE *cb_node, const VK_OBJECT &object, VkQueue queue, uint32_t count,
                                        const uint32_t *indices) {
     bool found = false;
     bool skip = false;
@@ -3029,12 +3029,12 @@ bool CoreChecks::ValidImageBufferQueue(GLOBAL_CB_NODE *cb_node, const VK_OBJECT 
         }
 
         if (!found) {
-            skip = log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, get_debug_report_enum[object->type], object->handle,
+            skip = log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, get_debug_report_enum[object.type], object.handle,
                            kVUID_Core_DrawState_InvalidQueueFamily,
                            "vkQueueSubmit: Command buffer %s contains %s %s which was not created allowing concurrent access to "
                            "this queue family %d.",
-                           report_data->FormatHandle(cb_node->commandBuffer).c_str(), object_string[object->type],
-                           report_data->FormatHandle(object->handle).c_str(), queue_state->queueFamilyIndex);
+                           report_data->FormatHandle(cb_node->commandBuffer).c_str(), object_string[object.type],
+                           report_data->FormatHandle(object).c_str(), queue_state->queueFamilyIndex);
         }
     }
     return skip;
@@ -3058,17 +3058,17 @@ bool CoreChecks::ValidateQueueFamilyIndices(GLOBAL_CB_NODE *pCB, VkQueue queue) 
         }
 
         // Ensure that any bound images or buffers created with SHARING_MODE_CONCURRENT have access to the current queue family
-        for (auto object : pCB->object_bindings) {
+        for (const auto &object : pCB->object_bindings) {
             if (object.type == kVulkanObjectTypeImage) {
-                auto image_state = GetImageState(reinterpret_cast<VkImage &>(object.handle));
+                auto image_state = GetImageState(object.Cast<VkImage>());
                 if (image_state && image_state->createInfo.sharingMode == VK_SHARING_MODE_CONCURRENT) {
-                    skip |= ValidImageBufferQueue(pCB, &object, queue, image_state->createInfo.queueFamilyIndexCount,
+                    skip |= ValidImageBufferQueue(pCB, object, queue, image_state->createInfo.queueFamilyIndexCount,
                                                   image_state->createInfo.pQueueFamilyIndices);
                 }
             } else if (object.type == kVulkanObjectTypeBuffer) {
-                auto buffer_state = GetBufferState(reinterpret_cast<VkBuffer &>(object.handle));
+                auto buffer_state = GetBufferState(object.Cast<VkBuffer>());
                 if (buffer_state && buffer_state->createInfo.sharingMode == VK_SHARING_MODE_CONCURRENT) {
-                    skip |= ValidImageBufferQueue(pCB, &object, queue, buffer_state->createInfo.queueFamilyIndexCount,
+                    skip |= ValidImageBufferQueue(pCB, object, queue, buffer_state->createInfo.queueFamilyIndexCount,
                                                   buffer_state->createInfo.pQueueFamilyIndices);
                 }
             }
@@ -3874,14 +3874,14 @@ void CoreChecks::PostCallRecordAllocateMemory(VkDevice device, const VkMemoryAll
 }
 
 // For given obj node, if it is use, flag a validation error and return callback result, else return false
-bool CoreChecks::ValidateObjectNotInUse(BASE_NODE *obj_node, VK_OBJECT obj_struct, const char *caller_name,
+bool CoreChecks::ValidateObjectNotInUse(BASE_NODE *obj_node, const VK_OBJECT &obj_struct, const char *caller_name,
                                         const char *error_code) {
     if (disabled.object_in_use) return false;
     bool skip = false;
     if (obj_node->in_use.load()) {
         skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, get_debug_report_enum[obj_struct.type], obj_struct.handle,
                         error_code, "Cannot call %s on %s %s that is currently in use by a command buffer.", caller_name,
-                        object_string[obj_struct.type], report_data->FormatHandle(obj_struct.handle).c_str());
+                        object_string[obj_struct.type], report_data->FormatHandle(obj_struct).c_str());
     }
     return skip;
 }
@@ -3902,14 +3902,17 @@ void CoreChecks::PreCallRecordFreeMemory(VkDevice device, VkDeviceMemory mem, co
     VK_OBJECT obj_struct(mem);
 
     // Clear mem binding for any bound objects
-    for (auto obj : mem_info->obj_bindings) {
+    for (const auto &obj : mem_info->obj_bindings) {
+        log_msg(report_data, VK_DEBUG_REPORT_INFORMATION_BIT_EXT, get_debug_report_enum[obj.type], obj.handle,
+                kVUID_Core_MemTrack_FreedMemRef, "VK Object %s still has a reference to mem obj %s.",
+                report_data->FormatHandle(obj).c_str(), report_data->FormatHandle(mem_info->mem).c_str());
         BINDABLE *bindable_state = nullptr;
         switch (obj.type) {
             case kVulkanObjectTypeImage:
-                bindable_state = GetImageState(reinterpret_cast<VkImage &>(obj.handle));
+                bindable_state = GetImageState(obj.Cast<VkImage>());
                 break;
             case kVulkanObjectTypeBuffer:
-                bindable_state = GetBufferState(reinterpret_cast<VkBuffer &>(obj.handle));
+                bindable_state = GetBufferState(obj.Cast<VkBuffer>());
                 break;
             default:
                 // Should only have buffer or image objects bound to memory
@@ -4304,8 +4307,8 @@ bool CoreChecks::RangesIntersect(MEMORY_RANGE const *range1, MEMORY_RANGE const 
             "%s %s %s is aliased with %s %s %s which may indicate a bug. For further info refer to the Buffer-Image Granularity "
             "section of the Vulkan specification. "
             "(https://www.khronos.org/registry/vulkan/specs/1.0-extensions/xhtml/vkspec.html#resources-bufferimagegranularity)",
-            r1_linear_str, r1_type_str, report_data->FormatHandle(range1->handle).c_str(), r2_linear_str, r2_type_str,
-            report_data->FormatHandle(range2->handle).c_str());
+            r1_linear_str, r1_type_str, report_data->FormatHandle(MemoryRangeTypedHandle(*range1)).c_str(), r2_linear_str,
+            r2_type_str, report_data->FormatHandle(MemoryRangeTypedHandle(*range2)).c_str());
     }
     // Ranges intersect
     return true;
@@ -4354,8 +4357,9 @@ bool CoreChecks::ValidateInsertMemoryRange(uint64_t handle, DEVICE_MEM_INFO *mem
                        HandleToUint64(mem_info->mem), error_code,
                        "In %s, attempting to bind memory (%s) to object (%s), memoryOffset=0x%" PRIxLEAST64
                        " must be less than the memory allocation size 0x%" PRIxLEAST64 ".",
-                       api_name, report_data->FormatHandle(mem_info->mem).c_str(), report_data->FormatHandle(handle).c_str(),
-                       memoryOffset, mem_info->alloc_info.allocationSize);
+                       api_name, report_data->FormatHandle(mem_info->mem).c_str(),
+                       report_data->FormatHandle(MemoryRangeTypedHandle(range)).c_str(), memoryOffset,
+                       mem_info->alloc_info.allocationSize);
     }
 
     return skip;
@@ -4463,7 +4467,8 @@ bool CoreChecks::ValidateBindBufferMemory(VkBuffer buffer, VkDeviceMemory mem, V
     if (buffer_state) {
         // Track objects tied to memory
         uint64_t buffer_handle = HandleToUint64(buffer);
-        skip = ValidateSetMemBinding(mem, buffer_handle, kVulkanObjectTypeBuffer, api_name);
+        VK_OBJECT obj_struct(buffer);
+        skip = ValidateSetMemBinding(mem, obj_struct, api_name);
         if (!buffer_state->memory_requirements_checked) {
             // There's not an explicit requirement in the spec to call vkGetBufferMemoryRequirements() prior to calling
             // BindBufferMemory, but it's implied in that memory being bound must conform with VkMemoryRequirements from
@@ -4472,7 +4477,7 @@ bool CoreChecks::ValidateBindBufferMemory(VkBuffer buffer, VkDeviceMemory mem, V
                 log_msg(report_data, VK_DEBUG_REPORT_WARNING_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, buffer_handle,
                         kVUID_Core_DrawState_InvalidBuffer,
                         "%s: Binding memory to buffer %s but vkGetBufferMemoryRequirements() has not been called on that buffer.",
-                        api_name, report_data->FormatHandle(buffer_handle).c_str());
+                        api_name, report_data->FormatHandle(buffer).c_str());
             // Make the call for them so we can verify the state
             DispatchGetBufferMemoryRequirements(device, buffer, &buffer_state->requirements);
         }
@@ -4519,7 +4524,7 @@ bool CoreChecks::ValidateBindBufferMemory(VkBuffer buffer, VkDeviceMemory mem, V
                                 "to buffer %s and memoryOffset 0x%" PRIxLEAST64 " must be zero.",
                                 api_name, report_data->FormatHandle(mem).c_str(),
                                 report_data->FormatHandle(mem_info->dedicated_buffer).c_str(),
-                                report_data->FormatHandle(buffer_handle).c_str(), memoryOffset);
+                                report_data->FormatHandle(buffer).c_str(), memoryOffset);
             }
         }
     }
@@ -4540,8 +4545,7 @@ void CoreChecks::UpdateBindBufferMemoryState(VkBuffer buffer, VkDeviceMemory mem
             InsertBufferMemoryRange(buffer, mem_info, memoryOffset, buffer_state->requirements);
         }
         // Track objects tied to memory
-        uint64_t buffer_handle = HandleToUint64(buffer);
-        SetMemBinding(mem, buffer_state, memoryOffset, buffer_handle, kVulkanObjectTypeBuffer);
+        SetMemBinding(mem, buffer_state, memoryOffset, VulkanTypedHandle(buffer));
     }
 }
 
@@ -7041,10 +7045,10 @@ bool CoreChecks::ValidatePipelineBindPoint(GLOBAL_CB_NODE *cb_state, VkPipelineB
         if (0 == (qfp.queueFlags & flag_mask.at(bind_point))) {
             const std::string &error = bind_errors.at(bind_point);
             auto cb_u64 = HandleToUint64(cb_state->commandBuffer);
-            auto cp_u64 = HandleToUint64(cb_state->createInfo.commandPool);
             skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT, cb_u64,
                             error, "%s: CommandBuffer %s was allocated from VkCommandPool %s that does not support bindpoint %s.",
-                            func_name, report_data->FormatHandle(cb_u64).c_str(), report_data->FormatHandle(cp_u64).c_str(),
+                            func_name, report_data->FormatHandle(cb_state->commandBuffer).c_str(),
+                            report_data->FormatHandle(cb_state->createInfo.commandPool).c_str(),
                             string_VkPipelineBindPoint(bind_point));
         }
     }
@@ -7082,7 +7086,7 @@ bool CoreChecks::PreCallValidateCmdPushDescriptorSetKHR(VkCommandBuffer commandB
                                    layout_u64, "VUID-vkCmdPushDescriptorSetKHR-set-00365",
                                    "%s: Set index %" PRIu32
                                    " does not match push descriptor set layout index for VkPipelineLayout %s.",
-                                   func_name, set, report_data->FormatHandle(layout_u64).c_str());
+                                   func_name, set, report_data->FormatHandle(layout).c_str());
                 } else {
                     // Create an empty proxy in order to use the existing descriptor set update validation
                     // TODO move the validation (like this) that doesn't need descriptor set state to the DSL object so we
@@ -7095,7 +7099,7 @@ bool CoreChecks::PreCallValidateCmdPushDescriptorSetKHR(VkCommandBuffer commandB
             skip = log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT, layout_u64,
                            "VUID-vkCmdPushDescriptorSetKHR-set-00364",
                            "%s: Set index %" PRIu32 " is outside of range for VkPipelineLayout %s (set < %" PRIu32 ").", func_name,
-                           set, report_data->FormatHandle(layout_u64).c_str(), static_cast<uint32_t>(set_layouts.size()));
+                           set, report_data->FormatHandle(layout).c_str(), static_cast<uint32_t>(set_layouts.size()));
         }
     }
 
@@ -7446,7 +7450,8 @@ static VkPipelineStageFlagBits GetLogicallyLatestGraphicsPipelineStage(VkPipelin
 // Verify image barrier image state and that the image is consistent with FB image
 bool CoreChecks::ValidateImageBarrierImage(const char *funcName, GLOBAL_CB_NODE const *cb_state, VkFramebuffer framebuffer,
                                            uint32_t active_subpass, const safe_VkSubpassDescription2KHR &sub_desc,
-                                           uint64_t rp_handle, uint32_t img_index, const VkImageMemoryBarrier &img_barrier) {
+                                           const VulkanTypedHandle &rp_handle, uint32_t img_index,
+                                           const VkImageMemoryBarrier &img_barrier) {
     bool skip = false;
     const auto &fb_state = GetFramebufferState(framebuffer);
     assert(fb_state);
@@ -7490,8 +7495,8 @@ bool CoreChecks::ValidateImageBarrierImage(const char *funcName, GLOBAL_CB_NODE 
             }
         }
         if (!sub_image_found) {
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-image-02635",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-image-02635",
                             "%s: Barrier pImageMemoryBarriers[%d].image (%s) is not referenced by the VkSubpassDescription for "
                             "active subpass (%d) of current renderPass (%s).",
                             funcName, img_index, report_data->FormatHandle(img_bar_image).c_str(), active_subpass,
@@ -7503,7 +7508,7 @@ bool CoreChecks::ValidateImageBarrierImage(const char *funcName, GLOBAL_CB_NODE 
             report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT, fb_handle,
             "VUID-vkCmdPipelineBarrier-image-02635",
             "%s: Barrier pImageMemoryBarriers[%d].image (%s) does not match an image from the current framebuffer (%s).", funcName,
-            img_index, report_data->FormatHandle(img_bar_image).c_str(), report_data->FormatHandle(fb_handle).c_str());
+            img_index, report_data->FormatHandle(img_bar_image).c_str(), report_data->FormatHandle(fb_state->framebuffer).c_str());
     }
     if (img_barrier.oldLayout != img_barrier.newLayout) {
         skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
@@ -7514,8 +7519,8 @@ bool CoreChecks::ValidateImageBarrierImage(const char *funcName, GLOBAL_CB_NODE 
                         string_VkImageLayout(img_barrier.newLayout));
     } else {
         if (sub_image_found && sub_image_layout != img_barrier.oldLayout) {
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-oldLayout-02636",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-oldLayout-02636",
                             "%s: Barrier pImageMemoryBarriers[%d].image (%s) is referenced by the VkSubpassDescription for active "
                             "subpass (%d) of current renderPass (%s) as having layout %s, but image barrier has layout %s.",
                             funcName, img_index, report_data->FormatHandle(img_bar_image).c_str(), active_subpass,
@@ -7528,7 +7533,7 @@ bool CoreChecks::ValidateImageBarrierImage(const char *funcName, GLOBAL_CB_NODE 
 
 // Validate image barriers within a renderPass
 bool CoreChecks::ValidateRenderPassImageBarriers(const char *funcName, GLOBAL_CB_NODE *cb_state, uint32_t active_subpass,
-                                                 const safe_VkSubpassDescription2KHR &sub_desc, uint64_t rp_handle,
+                                                 const safe_VkSubpassDescription2KHR &sub_desc, const VulkanTypedHandle &rp_handle,
                                                  const safe_VkSubpassDependency2KHR *dependencies,
                                                  const std::vector<uint32_t> &self_dependencies, uint32_t image_mem_barrier_count,
                                                  const VkImageMemoryBarrier *image_barriers) {
@@ -7548,14 +7553,14 @@ bool CoreChecks::ValidateRenderPassImageBarriers(const char *funcName, GLOBAL_CB
             std::stringstream self_dep_ss;
             stream_join(self_dep_ss, ", ", self_dependencies);
             skip |= log_msg(
-                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                 "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                 "%s: Barrier pImageMemoryBarriers[%d].srcAccessMask(0x%X) is not a subset of VkSubpassDependency "
                 "srcAccessMask of subpass %d of renderPass %s. Candidate VkSubpassDependency are pDependencies entries [%s].",
                 funcName, i, img_src_access_mask, active_subpass, report_data->FormatHandle(rp_handle).c_str(),
                 self_dep_ss.str().c_str());
             skip |= log_msg(
-                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                 "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                 "%s: Barrier pImageMemoryBarriers[%d].dstAccessMask(0x%X) is not a subset of VkSubpassDependency "
                 "dstAccessMask of subpass %d of renderPass %s. Candidate VkSubpassDependency are pDependencies entries [%s].",
@@ -7564,8 +7569,8 @@ bool CoreChecks::ValidateRenderPassImageBarriers(const char *funcName, GLOBAL_CB
         }
         if (VK_QUEUE_FAMILY_IGNORED != img_barrier.srcQueueFamilyIndex ||
             VK_QUEUE_FAMILY_IGNORED != img_barrier.dstQueueFamilyIndex) {
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-srcQueueFamilyIndex-01182",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-srcQueueFamilyIndex-01182",
                             "%s: Barrier pImageMemoryBarriers[%d].srcQueueFamilyIndex is %d and "
                             "pImageMemoryBarriers[%d].dstQueueFamilyIndex is %d but both must be VK_QUEUE_FAMILY_IGNORED.",
                             funcName, i, img_barrier.srcQueueFamilyIndex, i, img_barrier.dstQueueFamilyIndex);
@@ -7596,11 +7601,11 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
     bool skip = false;
     const auto rp_state = cb_state->activeRenderPass;
     const auto active_subpass = cb_state->activeSubpass;
-    auto rp_handle = HandleToUint64(rp_state->renderPass);
+    const VulkanTypedHandle rp_handle(rp_state->renderPass);
     const auto &self_dependencies = rp_state->self_dependencies[active_subpass];
     const auto &dependencies = rp_state->createInfo.pDependencies;
     if (self_dependencies.size() == 0) {
-        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                         "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                         "%s: Barriers cannot be set during subpass %d of renderPass %s with no self-dependency specified.",
                         funcName, active_subpass, report_data->FormatHandle(rp_handle).c_str());
@@ -7622,15 +7627,15 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
         if (!stage_mask_match) {
             std::stringstream self_dep_ss;
             stream_join(self_dep_ss, ", ", self_dependencies);
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-pDependencies-02285",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                             "%s: Barrier srcStageMask(0x%X) is not a subset of VkSubpassDependency srcStageMask of any "
                             "self-dependency of subpass %d of renderPass %s for which dstStageMask is also a subset. "
                             "Candidate VkSubpassDependency are pDependencies entries [%s].",
                             funcName, src_stage_mask, active_subpass, report_data->FormatHandle(rp_handle).c_str(),
                             self_dep_ss.str().c_str());
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-pDependencies-02285",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                             "%s: Barrier dstStageMask(0x%X) is not a subset of VkSubpassDependency dstStageMask of any "
                             "self-dependency of subpass %d of renderPass %s for which srcStageMask is also a subset. "
                             "Candidate VkSubpassDependency are pDependencies entries [%s].",
@@ -7639,8 +7644,8 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
         }
 
         if (0 != buffer_mem_barrier_count) {
-            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
-                            "VUID-vkCmdPipelineBarrier-bufferMemoryBarrierCount-01178",
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT,
+                            rp_handle.handle, "VUID-vkCmdPipelineBarrier-bufferMemoryBarrierCount-01178",
                             "%s: bufferMemoryBarrierCount is non-zero (%d) for subpass %d of renderPass %s.", funcName,
                             buffer_mem_barrier_count, active_subpass, report_data->FormatHandle(rp_handle).c_str());
         }
@@ -7659,7 +7664,7 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
                 std::stringstream self_dep_ss;
                 stream_join(self_dep_ss, ", ", self_dependencies);
                 skip |= log_msg(
-                    report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+                    report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                     "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                     "%s: Barrier pMemoryBarriers[%d].srcAccessMask(0x%X) is not a subset of VkSubpassDependency srcAccessMask "
                     "for any self-dependency of subpass %d of renderPass %s for which dstAccessMask is also a subset. "
@@ -7667,7 +7672,7 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
                     funcName, i, mb_src_access_mask, active_subpass, report_data->FormatHandle(rp_handle).c_str(),
                     self_dep_ss.str().c_str());
                 skip |= log_msg(
-                    report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+                    report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                     "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                     "%s: Barrier pMemoryBarriers[%d].dstAccessMask(0x%X) is not a subset of VkSubpassDependency dstAccessMask "
                     "for any self-dependency of subpass %d of renderPass %s for which srcAccessMask is also a subset. "
@@ -7690,7 +7695,7 @@ bool CoreChecks::ValidateRenderPassPipelineBarriers(const char *funcName, GLOBAL
             std::stringstream self_dep_ss;
             stream_join(self_dep_ss, ", ", self_dependencies);
             skip |= log_msg(
-                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle,
+                report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT, rp_handle.handle,
                 "VUID-vkCmdPipelineBarrier-pDependencies-02285",
                 "%s: dependencyFlags param (0x%X) does not equal VkSubpassDependency dependencyFlags value for any "
                 "self-dependency of subpass %d of renderPass %s. Candidate VkSubpassDependency are pDependencies entries [%s].",
@@ -10629,7 +10634,7 @@ bool CoreChecks::ValidateBindImageMemory(VkImage image, VkDeviceMemory mem, VkDe
     if (image_state) {
         // Track objects tied to memory
         uint64_t image_handle = HandleToUint64(image);
-        skip = ValidateSetMemBinding(mem, image_handle, kVulkanObjectTypeImage, api_name);
+        skip = ValidateSetMemBinding(mem, VulkanTypedHandle(image), api_name);
         if (!image_state->memory_requirements_checked) {
             // There's not an explicit requirement in the spec to call vkGetImageMemoryRequirements() prior to calling
             // BindImageMemory but it's implied in that memory being bound must conform with VkMemoryRequirements from
@@ -10707,8 +10712,7 @@ void CoreChecks::UpdateBindImageMemoryState(VkImage image, VkDeviceMemory mem, V
         }
 
         // Track objects tied to memory
-        uint64_t image_handle = HandleToUint64(image);
-        SetMemBinding(mem, image_state, memoryOffset, image_handle, kVulkanObjectTypeImage);
+        SetMemBinding(mem, image_state, memoryOffset, VulkanTypedHandle(image));
     }
 }
 
@@ -10947,14 +10951,14 @@ void CoreChecks::PostCallRecordQueueBindSparse(VkQueue queue, uint32_t bindInfoC
             for (uint32_t k = 0; k < bindInfo.pBufferBinds[j].bindCount; k++) {
                 auto sparse_binding = bindInfo.pBufferBinds[j].pBinds[k];
                 SetSparseMemBinding({sparse_binding.memory, sparse_binding.memoryOffset, sparse_binding.size},
-                                    HandleToUint64(bindInfo.pBufferBinds[j].buffer), kVulkanObjectTypeBuffer);
+                                    VulkanTypedHandle(bindInfo.pBufferBinds[j].buffer));
             }
         }
         for (uint32_t j = 0; j < bindInfo.imageOpaqueBindCount; j++) {
             for (uint32_t k = 0; k < bindInfo.pImageOpaqueBinds[j].bindCount; k++) {
                 auto sparse_binding = bindInfo.pImageOpaqueBinds[j].pBinds[k];
                 SetSparseMemBinding({sparse_binding.memory, sparse_binding.memoryOffset, sparse_binding.size},
-                                    HandleToUint64(bindInfo.pImageOpaqueBinds[j].image), kVulkanObjectTypeImage);
+                                    VulkanTypedHandle(bindInfo.pImageOpaqueBinds[j].image));
             }
         }
         for (uint32_t j = 0; j < bindInfo.imageBindCount; j++) {
@@ -10963,7 +10967,7 @@ void CoreChecks::PostCallRecordQueueBindSparse(VkQueue queue, uint32_t bindInfoC
                 // TODO: This size is broken for non-opaque bindings, need to update to comprehend full sparse binding data
                 VkDeviceSize size = sparse_binding.extent.depth * sparse_binding.extent.height * sparse_binding.extent.width * 4;
                 SetSparseMemBinding({sparse_binding.memory, sparse_binding.memoryOffset, size},
-                                    HandleToUint64(bindInfo.pImageBinds[j].image), kVulkanObjectTypeImage);
+                                    VulkanTypedHandle(bindInfo.pImageBinds[j].image));
             }
         }
 
@@ -11554,7 +11558,7 @@ void CoreChecks::PreCallRecordDestroySwapchainKHR(VkDevice device, VkSwapchainKH
                     }
                     imageSubresourceMap.erase(image_sub);
                 }
-                ClearMemoryObjectBindings(HandleToUint64(swapchain_image), kVulkanObjectTypeSwapchainKHR);
+                ClearMemoryObjectBindings(VulkanTypedHandle(swapchain_image));
                 EraseQFOImageRelaseBarriers(swapchain_image);
                 imageMap.erase(swapchain_image);
             }

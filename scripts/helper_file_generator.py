@@ -803,12 +803,14 @@ class HelperFileOutputGenerator(OutputGenerator):
                 uint64_t handle;
                 VulkanObjectType type;
                 template <typename Handle>
+                Handle Cast() const {
+                    assert(type == VkHandleInfo<Handle>::kVulkanObjectType);
+                    return CastFromUint64<Handle>(handle);
+                }
+                template <typename Handle>
                 VulkanTypedHandle(Handle handle_) :
                     handle(CastToUint64(handle_)),
                     type(VkHandleInfo<Handle>::kVulkanObjectType) {}
-                VulkanTypedHandle(uint64_t handle_, VulkanObjectType type_) :
-                    handle(handle_),
-                    type(type_) {}
                 VulkanTypedHandle() :
                     handle(VK_NULL_HANDLE),
                     type(kVulkanObjectTypeUnknown) {}
