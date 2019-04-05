@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 #include <map>
+
+// Must be before any include that includes vulkan/vulkan.h
+#include "typesafe_vulkan.h"
+
 #include "vulkan/vulkan.h"
 #include "vk_format_utils.h"
 

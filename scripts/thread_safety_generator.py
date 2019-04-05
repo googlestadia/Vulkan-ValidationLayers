@@ -167,8 +167,12 @@ static_assert(std::is_pointer<DISTINCT_NONDISPATCHABLE_PHONY_HANDLE>::value,
               "Mismatched non-dispatchable handle handle, expected pointer type.");
 #else
 // Make sure we catch any disagreement between us and the vulkan definition
-static_assert(std::is_same<uint64_t, DISTINCT_NONDISPATCHABLE_PHONY_HANDLE>::value,
-              "Mismatched non-dispatchable handle handle, expected uint64_t.");
+#ifndef TYPESAFE_32BIT_NON_DISPATCHABLE_HANDLES
+#error "Mismatched non-dispatchable handle declaration, expected typesafe."
+#endif
+#define DISTINCT_NONDISPATCHABLE_HANDLES
+static_assert(sizeof(DISTINCT_NONDISPATCHABLE_PHONY_HANDLE) == sizeof(uint64_t),
+              "With typesafe_vulkan enabled, non dispatchable handles must be 64bit");
 #endif
 
 // Suppress unused warning on Linux

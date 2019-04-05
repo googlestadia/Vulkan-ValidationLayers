@@ -55,6 +55,9 @@
 #include <string>
 #include <valarray>
 
+// Must be before any include that includes vulkan/vulkan.h
+#include "typesafe_vulkan.h"
+
 #include "vk_loader_platform.h"
 #include "vk_dispatch_table_helper.h"
 #include "vk_enum_string_helper.h"
@@ -3230,7 +3233,7 @@ void CoreChecks::PostCallRecordQueueSubmit(VkQueue queue, uint32_t submitCount, 
             }
         }
         pQueue->submissions.emplace_back(cbs, semaphore_waits, semaphore_signals, semaphore_externals,
-                                         submit_idx == submitCount - 1 ? fence : VK_NULL_HANDLE);
+                                         submit_idx == submitCount - 1 ? fence : (VkFence)VK_NULL_HANDLE);
     }
 
     if (early_retire_seq) {
@@ -11018,7 +11021,7 @@ void CoreChecks::PostCallRecordQueueBindSparse(VkQueue queue, uint32_t bindInfoC
         }
 
         pQueue->submissions.emplace_back(std::vector<VkCommandBuffer>(), semaphore_waits, semaphore_signals, semaphore_externals,
-                                         bindIdx == bindInfoCount - 1 ? fence : VK_NULL_HANDLE);
+                                         bindIdx == bindInfoCount - 1 ? fence : (VkFence)VK_NULL_HANDLE);
     }
 
     if (early_retire_seq) {

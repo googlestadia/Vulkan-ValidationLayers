@@ -19,6 +19,8 @@
 
 // Allow use of STL min and max functions in Windows
 #define NOMINMAX
+// Must be before any include that includes vulkan/vulkan.h
+#include "typesafe_vulkan.h"
 
 #include "chassis.h"
 #include "core_validation.h"

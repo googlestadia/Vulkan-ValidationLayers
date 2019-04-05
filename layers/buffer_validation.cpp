@@ -28,6 +28,9 @@
 #include <sstream>
 #include <string>
 
+// Must be before any include that includes vulkan/vulkan.h
+#include "typesafe_vulkan.h"
+
 #include "vk_enum_string_helper.h"
 #include "vk_layer_data.h"
 #include "vk_layer_utils.h"

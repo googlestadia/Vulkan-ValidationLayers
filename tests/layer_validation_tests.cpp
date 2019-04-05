@@ -31,6 +31,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#include "cast_utils.h"
 #include "layers/vk_device_profile_api_layer.h"
 
 #if defined(ANDROID)
@@ -938,15 +939,8 @@ class VkBufferTest {
         }
         if (AllocateCurrent) {
             if (InvalidDeleteEn) {
-                union {
-                    VkDeviceMemory device_memory;
-                    unsigned long long index_access;
-                } bad_index;
-
-                bad_index.device_memory = VulkanMemory;
-                bad_index.index_access++;
-
-                vkFreeMemory(VulkanDevice, bad_index.device_memory, nullptr);
+                auto bad_memory = CastFromUint64<VkDeviceMemory>(CastToUint64(VulkanMemory) + 1);
+                vkFreeMemory(VulkanDevice, bad_memory, nullptr);
             }
             vkFreeMemory(VulkanDevice, VulkanMemory, nullptr);
         }
@@ -3479,7 +3473,7 @@ TEST_F(VkLayerTest, PipelineNotBound) {
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkPipeline badPipeline = (VkPipeline)((size_t)0xbaadb1be);
+    VkPipeline badPipeline = CastToHandle<VkPipeline, uintptr_t>(0xbaadb1be);
 
     m_commandBuffer->begin();
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, badPipeline);
@@ -13244,8 +13238,8 @@ TEST_F(VkLayerTest, DescriptorSetCompatibility) {
     // VerifySetLayoutCompatibility fail cases:
     // 1. invalid VkPipelineLayout (layout) passed into vkCmdBindDescriptorSets
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdBindDescriptorSets-layout-parameter");
-    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipelineLayout)((size_t)0xbaadb1be), 0,
-                            1, &descriptorSet[0], 0, NULL);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            CastToHandle<VkPipelineLayout, uintptr_t>(0xbaadb1be), 0, 1, &descriptorSet[0], 0, NULL);
     m_errorMonitor->VerifyFound();
 
     // 2. layoutIndex exceeds # of layouts in layout
@@ -17662,7 +17656,7 @@ TEST_F(VkLayerTest, SampleDescriptorUpdateError) {
                                          {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
                                      });
 
-    VkSampler sampler = (VkSampler)((size_t)0xbaadbeef);  // Sampler with invalid handle
+    VkSampler sampler = CastToHandle<VkSampler, uintptr_t>(0xbaadbeef);  // Sampler with invalid handle
 
     VkDescriptorImageInfo descriptor_info;
     memset(&descriptor_info, 0, sizeof(VkDescriptorImageInfo));
@@ -17699,7 +17693,7 @@ TEST_F(VkLayerTest, ImageViewDescriptorUpdateError) {
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    VkImageView view = (VkImageView)((size_t)0xbaadbeef);  // invalid imageView object
+    VkImageView view = CastToHandle<VkImageView, uintptr_t>(0xbaadbeef);  // invalid imageView object
 
     VkDescriptorImageInfo descriptor_info;
     memset(&descriptor_info, 0, sizeof(VkDescriptorImageInfo));

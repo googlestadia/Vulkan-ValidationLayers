@@ -27,6 +27,10 @@
 #include <string>
 #include <sstream>
 #include <SPIRV/spirv.hpp>
+
+// Must be before any include that includes vulkan/vulkan.h
+#include "typesafe_vulkan.h"
+
 #include "vk_loader_platform.h"
 #include "vk_enum_string_helper.h"
 #include "vk_layer_data.h"

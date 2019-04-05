@@ -209,6 +209,7 @@ class LayerChassisOutputGenerator(OutputGenerator):
 #include <memory>
 
 #include "vk_loader_platform.h"
+#include "typesafe_vulkan.h"
 #include "vulkan/vulkan.h"
 #include "vk_layer_config.h"
 #include "vk_layer_data.h"
